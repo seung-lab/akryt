@@ -17,6 +17,23 @@ The overal goal is to reduce usage by a factor of 5x to 20x on the storage devic
 3. The machine status should be monitorable.
 4. If akryt goes down, it should be possible to bypass it and write directly to the storage device.
 
+## Design Outline
+
+The design centers on multiple microscopes that produce images voluminously and write files one at a time over an NFS mount. In effect, it is a sophisticated pipe and filter operation between the scope and the storage device. The microscopes do not respond to backpressure signals except via slowing the NFS mount, so for the most part, this is a soft-realtime system that must keep up with the pace.
+
+The system will consist of a set of pipe threads monitored by a master thread (launched on system startup) that can instantiate and terminate them. Each pipe thread has these elements stored in a configuration file under `$HOME/.akryt/pipes/`:
+
+1. Name (e.g. "fly" or "bladeXX")
+2. An NFS RAM disk mountpoint with a pre-allocated size.
+3. A target destination (e.g. an NFS mountpoint or object storage).
+4. A designated spillway to persistent disk of pre-allocated size.
+5. An assigned number of encoding cores/threads.
+6. Any necessary secrets.
+7. Encoding and parameters (e.g. `jxl -q 80 -e 3`). These may differ for the destination and the spillway.
+8. Types of file to be transcoded (e.g. `.bmp` as other files like `.txt` should be passed along without transcoding)
+
+When a pipe is closed, the disk, core, and RAM allocations are released. The pipe can only be closed once the spillway is emptied. When the system is online, and storage is reachable, and there are sufficient resources, the spillway should be emptied continuously.
+
 ## About the Name
 
 "akryt" is a phonetic misspelling of "accrete" as in the accretion disk of a gravitational singularity. In our compression pipeline, a large fast flow of images are condensed and the process develops heat as a byproduct. The resultant images then accumulate at the destination. 
