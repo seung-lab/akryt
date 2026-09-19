@@ -1,0 +1,13 @@
+[pipe]
+name = "machine01"
+mount = "nfs://mnt/machine01"
+destination = "s3://mybucket/"
+spillway = "/usr/akyrt/machine01/"
+secrets-file = ""
+worker-threads = 1
+codec-threads = 2
+runway = "25GB"
+spillway = "10TB"
+encoding = [
+	{ extension = ".bmp", "format" = "jxl", "quality" = 100, "effort" = 3 }
+]
