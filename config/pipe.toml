@@ -1,13 +1,25 @@
 [pipe]
 name = "machine01"
-mount = "nfs://mnt/machine01"
-destination = "s3://mybucket/"
-spillway = "/usr/akyrt/machine01/"
-secrets-file = ""
-worker-threads = 1
-codec-threads = 2
-runway = "25GB"
-spillway = "10TB"
-encoding = [
-	{ extension = ".bmp", "format" = "jxl", "quality" = 100, "effort" = 3 }
+source = { path = "nfs://mnt/machine01", size = "25GB" }
+destination =  {
+	path = "nokura://mybucket/",
+	secrets-file = "~/.akyrt/secrets/nokura-secret.json"
+}
+spillway = { path = "/usr/akyrt/machine01/", size = "10TB" }
+threads = { worker = 1, codec = 2 }
+encodings = [
+	{ 
+		extension = "*",
+		action = "compress",
+		compress = "zstd",
+		level = 3
+	},
+	{ 
+		extension = ".bmp",
+		action = "transcode",
+		format = "jxl",
+		colorspace = "gray",
+		quality = 100,
+		effort = 3
+	}
 ]
