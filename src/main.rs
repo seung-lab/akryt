@@ -1,5 +1,56 @@
 use image;
 use jpegxl_rs::encoder_builder;
+use toml::Table;
+
+#[derive(Debug, Deserialize)]
+struct Pipe {
+    name: String,
+    source: Source,
+    destination: Destination,
+    spillway: Spillway,
+    threads: Threads,
+    encodings: Vec<EncodingRule>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Source {
+    path: String,
+    size: u64
+}
+
+#[derive(Debug, Deserialize)]
+struct Destination {
+    path: String,
+    secrets_file: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Threads {
+    worker: u32,
+    codec: u32,
+}
+
+fn default_effort -> u8 { 3 }
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action")]
+struct EncodingRule {
+    #[serde(rename = "compress")]
+    Compress {
+        extension: String,
+        compress: String,
+        level: u8,
+    }
+    #[serde(rename = "transcode")]
+    Transcode {
+        extension: String,
+        format: String,
+        colorspace: String,
+        quality: u8,
+        #[serde(default = "default_effort")]
+        effort: u8,
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let img = image::open("test_src_dir/tile_0258_6.bmp")

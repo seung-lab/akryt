@@ -21,5 +21,13 @@ encodings = [
 		colorspace = "gray",
 		quality = 100,
 		effort = 3
+	},
+	{
+		extension = ".jpg",
+		action = "transcode",
+		format = "jxl",
+		colorspace = "gray",
+		quality = 100,
+		effort = 3
 	}
 ]
