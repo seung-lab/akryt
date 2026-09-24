@@ -1,58 +1,10 @@
 use image;
 use jpegxl_rs::encoder_builder;
-use toml::Table;
+use toml;
 
-#[derive(Debug, Deserialize)]
-struct Pipe {
-    name: String,
-    source: Source,
-    destination: Destination,
-    spillway: Spillway,
-    threads: Threads,
-    encodings: Vec<EncodingRule>,
-}
+mod config;
 
-#[derive(Debug, Deserialize)]
-struct Source {
-    path: String,
-    size: u64
-}
-
-#[derive(Debug, Deserialize)]
-struct Destination {
-    path: String,
-    secrets_file: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Threads {
-    worker: u32,
-    codec: u32,
-}
-
-fn default_effort -> u8 { 3 }
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "action")]
-struct EncodingRule {
-    #[serde(rename = "compress")]
-    Compress {
-        extension: String,
-        compress: String,
-        level: u8,
-    }
-    #[serde(rename = "transcode")]
-    Transcode {
-        extension: String,
-        format: String,
-        colorspace: String,
-        quality: u8,
-        #[serde(default = "default_effort")]
-        effort: u8,
-    }
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn transcode_example() -> Result<(), Box<dyn std::error::Error>> {
     let img = image::open("test_src_dir/tile_0258_6.bmp")
         .unwrap_or_else(|e| panic!("Failed to open image: {}", e));
 
@@ -73,6 +25,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jxl_data: jpegxl_rs::encode::EncoderResult<u8> = encoder.encode_frame(&frame, width, height)?;
 
     std::fs::write("test_dest_dir/tile_0258_6.jxl", &jxl_data.data)?;
+
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let contents = std::fs::read_to_string("config/pipe.toml")?;
+
+    let cfg: config::Config = toml::from_str(&contents)?;
+    // convert cfg into a parsed datastructure
+
+    println!("wow {}", cfg.pipe.source.path);
 
     Ok(())
 }

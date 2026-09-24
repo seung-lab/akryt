@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 image = "0.25.10"
 jpegxl-rs = { version = "0.14.0", features = ["vendored"] }
-toml_edit = "0.25.15"
-
+serde = { version = "1", features = ["derive"] }
+toml = "1.1.6"
 
 [profile.dev]
 opt-level = 1
