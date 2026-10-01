@@ -44,21 +44,27 @@ pub struct Threads {
 fn default_effort() -> u8 { 3 }
 
 #[derive(Debug, Deserialize)]
+pub struct Transcode {
+    pub extension: String,
+    pub format: String,
+    pub colorspace: String,
+    pub quality: u8,
+    #[serde(default = "default_effort")]
+    pub effort: u8,  
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Compress {
+    pub extension: String,
+    pub compress: String,
+    pub level: u8,    
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(tag = "action")]
 pub enum EncodingRule {
     #[serde(rename = "compress")]
-    Compress {
-        extension: String,
-        compress: String,
-        level: u8,
-    },
+    Compress(Compress),
     #[serde(rename = "transcode")]
-    Transcode {
-        extension: String,
-        format: String,
-        colorspace: String,
-        quality: u8,
-        #[serde(default = "default_effort")]
-        effort: u8,
-    },
+    Transcode(Transcode),
 }
