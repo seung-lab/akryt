@@ -48,9 +48,9 @@ pub struct Transcode {
     pub extension: String,
     pub format: String,
     pub colorspace: String,
-    pub quality: u8,
+    pub quality: f32,
     #[serde(default = "default_effort")]
-    pub effort: u8,  
+    pub effort: u8,
 }
 
 #[derive(Debug, Deserialize)]

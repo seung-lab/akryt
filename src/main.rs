@@ -24,6 +24,7 @@ fn jxl_int2effort(effort:u8) -> jpegxl_rs::encode::EncoderSpeed {
 fn transcode(
 	src_path: &std::path::Path,
 	dest_path: &std::path::Path,
+	quality: f32,
 	effort: jpegxl_rs::encode::EncoderSpeed,
 ) 
 	-> Result<(), Box<dyn std::error::Error>> {
@@ -35,18 +36,23 @@ fn transcode(
 	let (width, height) = rgba_image.dimensions();
 	let raw_pixels = rgba_image.into_raw(); // Vec<u8>
 
-	println!("width {} height {}", width, height);
+	println!("width {} height {} quality {}", width, height, quality);
 
-	let mut encoder = encoder_builder().build()?;
+	let mut encoder = encoder_builder()
+		.speed(effort)
+		.color_encoding(jpegxl_rs::encode::ColorEncoding::SrgbLuma)
+		.quality(quality)
+		.lossless(quality == 0.0)
+		.uses_original_profile(quality == 0.0)
+		.build()
+		.unwrap();
 
 	let frame = jpegxl_rs::encode::EncoderFrame::new(&raw_pixels)
 		.num_channels(1);
 
-	encoder.color_encoding = Some(jpegxl_rs::encode::ColorEncoding::SrgbLuma);
-	encoder.speed = effort;
-	encoder.lossless = Some(true);
-
 	let jxl_data: jpegxl_rs::encode::EncoderResult<u8> = encoder.encode_frame(&frame, width, height)?;
+
+	println!("path {}", dest_path.display());
 
 	std::fs::write(dest_path, &jxl_data.data)?;
 
@@ -111,15 +117,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			println!("not exists filename: {}", e.path().display());
 		}
 
+		println!("processing filename: {}", e.path().display());
+
 		let mut dest_path = dest_dir.join(e.file_name());
 
 		// This needs to be more dynamic
 		// but it's okay for now.
 		dest_path.set_extension("jxl");
 
-		transcode(&e.path(), &dest_path, jxl_effort);
+		transcode(&e.path(), &dest_path, jxl_cfg.quality, jxl_effort)?;
 
-		println!("transcoded: {}", e.file_name().display());
+		println!("transcoded: {} to {}", e.file_name().display(), dest_path.display());
 	}
 
 	Ok(())
