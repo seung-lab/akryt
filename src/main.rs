@@ -140,14 +140,9 @@ fn process_source_directory(
 	Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let contents = std::fs::read_to_string("config/test.toml")?;
-
-	let cfg: config::Config = toml::from_str(&contents)?;
-	// convert cfg into a parsed datastructure
-
-	validate_config(&cfg)?;
-
+fn start_watching(
+	cfg: &config::Config,
+) -> Result<(), Box<dyn std::error::Error>> {
 	let src_path = std::path::PathBuf::from(&cfg.pipe.source.path);
 	let dest_dir = std::path::PathBuf::from(&cfg.pipe.destination.path);
 
@@ -192,6 +187,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	)?;
 
 	watcher.watch(src_path.as_path(), notify::RecursiveMode::Recursive)?;
+
+	Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+	let contents = std::fs::read_to_string("config/test.toml")?;
+
+	let cfg: config::Config = toml::from_str(&contents)?;
+	// convert cfg into a parsed datastructure
+
+	validate_config(&cfg)?;
+
+	start_watching(&cfg)?;
 
 	println!("akryt: polling every {} msec.", cfg.pipe.source.poll.as_millis());
 	std::thread::park();
