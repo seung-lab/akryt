@@ -1,6 +1,10 @@
 [pipe]
 name = "machine01"
-source = { path = "nfs://mnt/machine01", size = "25GB" }
+source = { 
+	path = "nfs://mnt/machine01", 
+	size = "25GB", 
+	poll = "150ms",
+}
 destination =  {
 	path = "nokura://mybucket/",
 	secrets-file = "~/.akyrt/secrets/nokura-secret.json"

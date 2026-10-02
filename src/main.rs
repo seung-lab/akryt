@@ -1,5 +1,8 @@
+use std::thread;
+
 use image;
 use jpegxl_rs::encoder_builder;
+use notify::Watcher;
 use toml;
 
 mod config;
@@ -59,7 +62,7 @@ fn transcode(
 	Ok(())
 }
 
-fn validate_config(cfg: &config::Config) -> Result<&std::path::Path, Box<dyn std::error::Error>> {
+fn validate_config(cfg: &config::Config) -> Result<(), Box<dyn std::error::Error>> {
 	let src_path = std::path::Path::new(&cfg.pipe.source.path);
 	
 	if !src_path.exists() {
@@ -82,30 +85,15 @@ fn validate_config(cfg: &config::Config) -> Result<&std::path::Path, Box<dyn std
 		return Err(format!("Destination path is not a directory: {}", dest_path.display()).into());
 	}
 
-	Ok(src_path)
+	Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let contents = std::fs::read_to_string("config/test.toml")?;
-
-	let cfg: config::Config = toml::from_str(&contents)?;
-	// convert cfg into a parsed datastructure
-
-	let src_path = validate_config(&cfg)?;
-
-	let dest_dir = std::path::Path::new(&cfg.pipe.destination.path);
-
-	let jxl_cfg = cfg.pipe.encodings.iter()
-		.filter_map(|r| match r {
-			config::EncodingRule::Transcode(t) if t.format == "jxl" => Some(t),
-			_ => None,
-		})
-		.next()
-		.unwrap();
-
-	let jxl_effort = jxl_int2effort(jxl_cfg.effort);
-
-	println!("src: {} dest: {}", cfg.pipe.source.path, cfg.pipe.destination.path);
+fn process_source_directory(
+	src_path: &std::path::Path,
+	dest_dir: &std::path::Path,
+	jxl_effort: jpegxl_rs::encode::EncoderSpeed,
+	jxl_quality: f32,
+) -> Result<(), Box<dyn std::error::Error>> {
 
 	let all_files = std::fs::read_dir(src_path)?;
 
@@ -113,8 +101,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let e = entry?;
 
 		if !e.path().exists() {
-			continue;
 			println!("not exists filename: {}", e.path().display());
+			continue;
+		}
+		else if e.path().extension() != Some(std::ffi::OsStr::new("bmp")) {
+			println!("skipping: {}", e.path().display());
+			continue;
 		}
 
 		println!("processing filename: {}", e.path().display());
@@ -125,10 +117,69 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		// but it's okay for now.
 		dest_path.set_extension("jxl");
 
-		transcode(&e.path(), &dest_path, jxl_cfg.quality, jxl_effort)?;
+		transcode(&e.path(), &dest_path, jxl_quality, jxl_effort)?;
 
 		println!("transcoded: {} to {}", e.file_name().display(), dest_path.display());
+
+		std::fs::remove_file(e.path())?;
 	}
 
+	Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+	let contents = std::fs::read_to_string("config/test.toml")?;
+
+	let cfg: config::Config = toml::from_str(&contents)?;
+	// convert cfg into a parsed datastructure
+
+	validate_config(&cfg)?;
+
+	let src_path = std::path::PathBuf::from(&cfg.pipe.source.path);
+	let dest_dir = std::path::PathBuf::from(&cfg.pipe.destination.path);
+
+	let jxl_cfg = cfg.pipe.encodings.iter()
+		.filter_map(|r| match r {
+			config::EncodingRule::Transcode(t) if t.format == "jxl" => Some(t),
+			_ => None,
+		})
+		.next()
+		.unwrap();
+
+	let jxl_quality = jxl_cfg.quality;
+	let jxl_effort = jxl_int2effort(jxl_cfg.effort);
+
+	println!("src: {} dest: {}", cfg.pipe.source.path, cfg.pipe.destination.path);
+
+	let notify_config = notify::Config::default()
+		.with_poll_interval(cfg.pipe.source.poll);
+
+	let src_path_closure = src_path.clone();
+	let dest_dir_closure = dest_dir.clone();
+
+	let mut watcher = notify::PollWatcher::new(
+		move |res: Result<notify::Event, notify::Error>| {
+			match res {
+				Ok(_event) => {
+					if let Err(err) = process_source_directory(
+						src_path_closure.as_path(),
+						dest_dir_closure.as_path(),
+						jxl_effort,
+						jxl_quality,
+					) {
+						eprintln!("watch error: {:?}", err);	
+					}
+				},
+				Err(err) => eprintln!("watch error: {:?}", err),
+			}
+		},
+		notify_config,
+	)?;
+
+	watcher.watch(src_path.as_path(), notify::RecursiveMode::Recursive)?;
+
+	println!("akryt: polling every {} msec.", cfg.pipe.source.poll.as_millis());
+	std::thread::park();
+	
 	Ok(())
 }
