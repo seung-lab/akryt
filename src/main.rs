@@ -8,7 +8,7 @@ use toml;
 
 mod config;
 
-fn jxl_int2effort(effort:u8) -> jpegxl_rs::encode::EncoderSpeed {
+fn int_to_jxl_effort(effort:u8) -> jpegxl_rs::encode::EncoderSpeed {
 	use jpegxl_rs::encode::EncoderSpeed::*;
 	match effort {
 		1 => Lightning,
@@ -160,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.unwrap();
 
 	let jxl_quality = jxl_cfg.quality;
-	let jxl_effort = jxl_int2effort(jxl_cfg.effort);
+	let jxl_effort = int_to_jxl_effort(jxl_cfg.effort);
 
 	println!("src: {} dest: {}", cfg.pipe.source.path, cfg.pipe.destination.path);
 
