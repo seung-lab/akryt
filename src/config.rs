@@ -48,8 +48,8 @@ pub struct Spillway {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Threads {
-    pub worker: u32,
-    pub codec: u32,
+    pub worker: usize,
+    pub codec: usize,
 }
 
 fn default_effort() -> u8 { 3 }

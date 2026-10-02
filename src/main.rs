@@ -2,6 +2,7 @@ use std::thread;
 
 use image;
 use jpegxl_rs::encoder_builder;
+use jpegxl_rs::ThreadsRunner;
 use notify::Watcher;
 use toml;
 
@@ -29,11 +30,18 @@ fn transcode(
 	dest_path: &std::path::Path,
 	quality: f32,
 	effort: jpegxl_rs::encode::EncoderSpeed,
+	codec_threads: usize,
 ) 
 	-> Result<(), Box<dyn std::error::Error>> {
 
-	let img = image::open(src_path)
-		.unwrap_or_else(|e| panic!("Failed to open image: {}", e));
+	let img = match image::open(src_path) {
+        Ok(img) => img,
+        Err(image::ImageError::IoError(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipping {}: vanished", src_path.display());
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
 
 	let rgba_image = img.to_luma8();
 	let (width, height) = rgba_image.dimensions();
@@ -41,7 +49,11 @@ fn transcode(
 
 	println!("width {} height {} quality {}", width, height, quality);
 
+	let runner = ThreadsRunner::new(None, Some(codec_threads))
+		.expect("failed to create runner");
+
 	let mut encoder = encoder_builder()
+		.parallel_runner(&runner)
 		.speed(effort)
 		.color_encoding(jpegxl_rs::encode::ColorEncoding::SrgbLuma)
 		.quality(quality)
@@ -54,8 +66,6 @@ fn transcode(
 		.num_channels(1);
 
 	let jxl_data: jpegxl_rs::encode::EncoderResult<u8> = encoder.encode_frame(&frame, width, height)?;
-
-	println!("path {}", dest_path.display());
 
 	std::fs::write(dest_path, &jxl_data.data)?;
 
@@ -93,6 +103,7 @@ fn process_source_directory(
 	dest_dir: &std::path::Path,
 	jxl_effort: jpegxl_rs::encode::EncoderSpeed,
 	jxl_quality: f32,
+	codec_threads: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
 
 	let all_files = std::fs::read_dir(src_path)?;
@@ -117,9 +128,11 @@ fn process_source_directory(
 		// but it's okay for now.
 		dest_path.set_extension("jxl");
 
-		transcode(&e.path(), &dest_path, jxl_quality, jxl_effort)?;
+		let t_start = std::time::Instant::now();
 
-		println!("transcoded: {} to {}", e.file_name().display(), dest_path.display());
+		transcode(&e.path(), &dest_path, jxl_quality, jxl_effort, codec_threads)?;
+
+		println!("transcoded: {} to {} in {} msec", e.file_name().display(), dest_path.display(), t_start.elapsed().as_millis());
 
 		std::fs::remove_file(e.path())?;
 	}
@@ -156,6 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let src_path_closure = src_path.clone();
 	let dest_dir_closure = dest_dir.clone();
+	let codec_threads_closure = cfg.pipe.threads.codec;
 
 	let mut watcher = notify::PollWatcher::new(
 		move |res: Result<notify::Event, notify::Error>| {
@@ -166,6 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						dest_dir_closure.as_path(),
 						jxl_effort,
 						jxl_quality,
+						codec_threads_closure,
 					) {
 						eprintln!("watch error: {:?}", err);	
 					}
