@@ -1,5 +1,8 @@
 use std::thread;
+use std::collections;
+use std::sync;
 
+use crossbeam_channel;
 use image;
 use jpegxl_rs::encoder_builder;
 use jpegxl_rs::ThreadsRunner;
@@ -7,6 +10,14 @@ use notify::Watcher;
 use toml;
 
 mod config;
+
+type InFlightSet = std::sync::Arc<
+	std::sync::Mutex<
+		std::collections::HashSet<std::path::PathBuf>
+	>
+>;
+
+const QUEUE_CAPACITY : usize = 1_000_000;
 
 fn int_to_jxl_effort(effort:u8) -> jpegxl_rs::encode::EncoderSpeed {
 	use jpegxl_rs::encode::EncoderSpeed::*;
@@ -67,6 +78,10 @@ fn transcode(
 
 	let jxl_data: jpegxl_rs::encode::EncoderResult<u8> = encoder.encode_frame(&frame, width, height)?;
 
+	if let Some(parent) = dest_path.parent() {
+		std::fs::create_dir_all(parent)?;
+	}
+
 	std::fs::write(dest_path, &jxl_data.data)?;
 
 	Ok(())
@@ -98,51 +113,58 @@ fn validate_config(cfg: &config::Config) -> Result<(), Box<dyn std::error::Error
 	Ok(())
 }
 
-fn process_source_directory(
+fn process_file(
 	src_path: &std::path::Path,
+	src_dir: &std::path::Path,
 	dest_dir: &std::path::Path,
-	jxl_effort: jpegxl_rs::encode::EncoderSpeed,
 	jxl_quality: f32,
+	jxl_effort: jpegxl_rs::encode::EncoderSpeed,
 	codec_threads: usize,
+	in_flight_set: &InFlightSet,
 ) -> Result<(), Box<dyn std::error::Error>> {
 
-	let all_files = std::fs::read_dir(src_path)?;
-
-	for entry in all_files {
-		let e = entry?;
-
-		if !e.path().exists() {
-			println!("not exists filename: {}", e.path().display());
-			continue;
-		}
-		else if e.path().extension() != Some(std::ffi::OsStr::new("bmp")) {
-			println!("skipping: {}", e.path().display());
-			continue;
-		}
-
-		println!("processing filename: {}", e.path().display());
-
-		let mut dest_path = dest_dir.join(e.file_name());
-
-		// This needs to be more dynamic
-		// but it's okay for now.
-		dest_path.set_extension("jxl");
-
-		let t_start = std::time::Instant::now();
-
-		transcode(&e.path(), &dest_path, jxl_quality, jxl_effort, codec_threads)?;
-
-		println!("transcoded: {} to {} in {} msec", e.file_name().display(), dest_path.display(), t_start.elapsed().as_millis());
-
-		std::fs::remove_file(e.path())?;
+	if !src_path.exists() {
+		println!("not exists filename: {}", src_path.display());
+		return Ok(());
 	}
+	else if src_path.extension() != Some(std::ffi::OsStr::new("bmp")) {
+		println!("skipping: {}", src_path.display());
+		return Ok(());
+	}
+
+	println!("processing filename: {}", src_path.display());
+	println!("dest_dir: {}", dest_dir.display());
+
+	let relative_src_path = src_path.strip_prefix(src_dir)?;
+	let mut dest_path = dest_dir.join(relative_src_path);
+
+	// This needs to be more dynamic
+	// but it's okay for now.
+	dest_path.set_extension("jxl");
+
+	let t_start = std::time::Instant::now();
+
+	match transcode(&src_path, &dest_path, jxl_quality, jxl_effort, codec_threads) {
+		Ok(_) => {
+			println!("transcoded: {} to {} in {} msec", src_path.display(), dest_path.display(), t_start.elapsed().as_millis());
+			std::fs::remove_file(src_path)?;
+		},
+		Err(err) => {
+			eprintln!("ERROR transcoding {}: {}", src_path.display(), err);
+		},
+	}
+
+	let mut set = in_flight_set.lock().unwrap();
+	set.remove(src_path);
 
 	Ok(())
 }
 
 fn start_watching(
 	cfg: &config::Config,
-) -> Result<(), Box<dyn std::error::Error>> {
+	tx: &crossbeam_channel::Sender<std::path::PathBuf>,
+	in_flight_set: &InFlightSet,
+) -> Result<notify::PollWatcher, Box<dyn std::error::Error>> {
 	let src_path = std::path::PathBuf::from(&cfg.pipe.source.path);
 	let dest_dir = std::path::PathBuf::from(&cfg.pipe.destination.path);
 
@@ -166,18 +188,43 @@ fn start_watching(
 	let dest_dir_closure = dest_dir.clone();
 	let codec_threads_closure = cfg.pipe.threads.codec;
 
+	let all_files = std::fs::read_dir(&src_path)?;
+
+	let mut set = in_flight_set.lock().unwrap();
+	for (i, entry) in all_files.enumerate() {
+		if i >= QUEUE_CAPACITY {
+			break;
+		}
+
+		let e = entry?;	
+		let path = e.path();
+		tx.send(path.clone())?;
+		set.insert(path.clone());
+	}
+	drop(set);
+
+	let closure_in_flight_set = std::sync::Arc::clone(in_flight_set);
+	let closure_tx = tx.clone();
+
 	let mut watcher = notify::PollWatcher::new(
 		move |res: Result<notify::Event, notify::Error>| {
 			match res {
-				Ok(_event) => {
-					if let Err(err) = process_source_directory(
-						src_path_closure.as_path(),
-						dest_dir_closure.as_path(),
-						jxl_effort,
-						jxl_quality,
-						codec_threads_closure,
-					) {
-						eprintln!("watch error: {:?}", err);	
+				Ok(event) => {
+					let closure_set = closure_in_flight_set.lock().unwrap();
+
+					for path in &event.paths {
+						println!("considering: {}", path.display());
+						if path.extension() != Some(std::ffi::OsStr::new("bmp")) {
+							println!("not a bmp: {}", path.display());
+							continue;
+						}
+						else if closure_set.contains(path) {
+							println!("already in paths: {}", path.display());
+							continue;
+						}
+						else {
+							closure_tx.send(path.to_path_buf());
+						}
 					}
 				},
 				Err(err) => eprintln!("watch error: {:?}", err),
@@ -188,7 +235,7 @@ fn start_watching(
 
 	watcher.watch(src_path.as_path(), notify::RecursiveMode::Recursive)?;
 
-	Ok(())
+	Ok(watcher)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -197,11 +244,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let cfg: config::Config = toml::from_str(&contents)?;
 	// convert cfg into a parsed datastructure
 
+	let in_flight_set : InFlightSet = std::sync::Arc::new(std::sync::Mutex::new(
+		std::collections::HashSet::new()
+	));
+
 	validate_config(&cfg)?;
 
-	start_watching(&cfg)?;
+	let (tx, rx) = crossbeam_channel::bounded(QUEUE_CAPACITY);
 
-	println!("akryt: polling every {} msec.", cfg.pipe.source.poll.as_millis());
+	let watcher = start_watching(&cfg, &tx, &in_flight_set)?;
+
+	let src_dir = std::path::PathBuf::from(&cfg.pipe.source.path);
+	let dest_dir = std::path::PathBuf::from(&cfg.pipe.destination.path);
+	
+	let jxl_cfg = cfg.pipe.encodings.iter()
+		.filter_map(|r| match r {
+			config::EncodingRule::Transcode(t) if t.format == "jxl" => Some(t),
+			_ => None,
+		})
+		.next()
+		.unwrap();
+
+	let jxl_quality = jxl_cfg.quality;
+	let jxl_effort = int_to_jxl_effort(jxl_cfg.effort);
+
+	let src_dir_closure = src_dir.clone();
+	let dest_dir_closure = dest_dir.clone();
+	let codec_threads_closure = cfg.pipe.threads.codec;
+
+	let closure_in_flight_set = std::sync::Arc::clone(&in_flight_set);
+
+	let processing_thread = std::thread::spawn(move || {
+		for src_path in rx.iter() {
+			process_file(
+				&src_path, 
+				&src_dir,
+				&dest_dir,
+				jxl_quality, jxl_effort, 
+				codec_threads_closure,
+				&closure_in_flight_set,
+			);
+		}
+	});
+
+	println!("akryt: polling every {} msec: {}", cfg.pipe.source.poll.as_millis(), cfg.pipe.source.path);
 	std::thread::park();
 	
 	Ok(())
