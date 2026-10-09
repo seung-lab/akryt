@@ -168,25 +168,10 @@ fn start_watching(
 	let src_path = std::path::PathBuf::from(&cfg.pipe.source.path);
 	let dest_dir = std::path::PathBuf::from(&cfg.pipe.destination.path);
 
-	let jxl_cfg = cfg.pipe.encodings.iter()
-		.filter_map(|r| match r {
-			config::EncodingRule::Transcode(t) if t.format == "jxl" => Some(t),
-			_ => None,
-		})
-		.next()
-		.unwrap();
-
-	let jxl_quality = jxl_cfg.quality;
-	let jxl_effort = int_to_jxl_effort(jxl_cfg.effort);
-
 	println!("src: {} dest: {}", cfg.pipe.source.path, cfg.pipe.destination.path);
 
 	let notify_config = notify::Config::default()
 		.with_poll_interval(cfg.pipe.source.poll);
-
-	let src_path_closure = src_path.clone();
-	let dest_dir_closure = dest_dir.clone();
-	let codec_threads_closure = cfg.pipe.threads.codec;
 
 	let all_files = std::fs::read_dir(&src_path)?;
 

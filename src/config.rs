@@ -44,7 +44,6 @@ pub struct Spillway {
     pub size: u64,
 }
 
-
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Threads {
