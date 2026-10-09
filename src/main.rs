@@ -21,6 +21,7 @@ const CONFIG_DIR: &str = "config/";
 
 struct PipeHandle {
     _watcher: notify::PollWatcher,
+    cfg: config::Config,
     _tx: crossbeam_channel::Sender<PathBuf>,
     _rx: crossbeam_channel::Receiver<PathBuf>,
     workers: Vec<std::thread::JoinHandle<()>>,
@@ -324,6 +325,7 @@ fn start_workers_for_pipe(
 
     Ok(PipeHandle {
         _watcher: watcher,
+        cfg: cfg,
         _tx: tx,
         _rx: rx,
         workers: workers,
@@ -353,21 +355,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     entries.sort();
 
     for path in entries {
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("<unknown>")
-            .to_string();
-
-        println!("Starting: {}", name);
+        println!("Read config file: {}", path.display());
 
         match start_workers_for_pipe(&path) {
             Ok(handle) => {
-                println!("Opened {}", name);
-                pipes.insert(name, handle);
+                println!("Opened pipe: {}", handle.cfg.pipe.name);
+                pipes.insert(handle.cfg.pipe.name.clone(), handle);
             }
             Err(err) => {
-                eprintln!("Encountered an error opening {}: {err}", name);
+                eprintln!("Encountered an error opening {:?}: {err}", path.file_name());
             }
         }
     }
