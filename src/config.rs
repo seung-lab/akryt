@@ -51,7 +51,9 @@ pub struct Threads {
     pub codec: usize,
 }
 
-fn default_effort() -> u8 { 3 }
+fn default_effort() -> u8 {
+    3
+}
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -69,7 +71,7 @@ pub struct Transcode {
 pub struct Compress {
     pub extension: String,
     pub compress: String,
-    pub level: u8,    
+    pub level: u8,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -97,14 +99,14 @@ fn parse_byte_size_str(s: &str) -> Result<u64, String> {
     let i = s.find(|c: char| c.is_alphabetic()).unwrap_or(s.len());
     let (num, unit) = (&s[..i], &s[i..]);
     let n: u64 = num.parse().map_err(|_| format!("bad number: {num}"))?;
-    
+
     let (mult, label) = match unit.to_ascii_lowercase().as_str() {
-        "" | "b"  => (1u64, "B"),
-        "k" | "kb"   => (1_000, "KB"),
+        "" | "b" => (1u64, "B"),
+        "k" | "kb" => (1_000, "KB"),
         "ki" | "kib" => (1_024, "KiB"),
-        "m" | "mb"   => (1_000_000, "MB"),
+        "m" | "mb" => (1_000_000, "MB"),
         "mi" | "mib" => (1_048_576, "MiB"),
-        "g" | "gb"   => (1_000_000_000, "GB"),
+        "g" | "gb" => (1_000_000_000, "GB"),
         "gi" | "gib" => (1_073_741_824, "GiB"),
         other => return Err(format!("unknown unit: {other:?}")),
     };
