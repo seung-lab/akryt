@@ -3,14 +3,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::vec::Vec;
-use tempfile;
 
 use crossbeam_channel;
 use image;
 use jpegxl_rs::ThreadsRunner;
 use jpegxl_rs::encoder_builder;
 use notify::Watcher;
+use tempfile;
 use toml;
+use walkdir;
 
 mod config;
 
@@ -200,16 +201,16 @@ fn start_watching(
 
     let notify_config = notify::Config::default().with_poll_interval(cfg.pipe.source.poll);
 
-    let all_files = std::fs::read_dir(&src_path)?;
+    let all_files = walkdir::WalkDir::new(&src_path);
 
     let mut set = in_flight_set.lock().unwrap();
-    for (i, entry) in all_files.enumerate() {
-        if i >= QUEUE_CAPACITY {
-            break;
-        }
-
-        let e = entry?;
-        let path = e.path();
+    for entry in all_files
+    	.into_iter()
+		.filter_map(Result::ok)
+	    .filter(|e| e.file_type().is_file())
+	    .take(QUEUE_CAPACITY) 
+	{
+        let path = entry.path().to_path_buf();
         tx.send(path.clone())?;
         set.insert(path.clone());
     }
