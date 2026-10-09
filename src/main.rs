@@ -1,5 +1,6 @@
-use std::collections;
-use std::sync;
+use std::collections::{HashSet, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use tempfile;
 
@@ -12,10 +13,17 @@ use toml;
 
 mod config;
 
-type InFlightSet = std::sync::Arc<std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>>;
+type InFlightSet = Arc<Mutex<HashSet<PathBuf>>>;
 
 const QUEUE_CAPACITY: usize = 1_000_000;
 const CONFIG_DIR: &str = "config/";
+
+struct PipeHandle {
+    _watcher: notify::PollWatcher,
+    _tx: crossbeam_channel::Sender<PathBuf>,
+    _rx: crossbeam_channel::Receiver<PathBuf>,
+    workers: std::vec::Vec<std::thread::JoinHandle<()>>,
+}
 
 fn int_to_jxl_effort(effort: u8) -> jpegxl_rs::encode::EncoderSpeed {
     use jpegxl_rs::encode::EncoderSpeed::*;
@@ -35,8 +43,8 @@ fn int_to_jxl_effort(effort: u8) -> jpegxl_rs::encode::EncoderSpeed {
 }
 
 fn transcode(
-    src_path: &std::path::Path,
-    dest_path: &std::path::Path,
+    src_path: &Path,
+    dest_path: &Path,
     quality: f32,
     effort: jpegxl_rs::encode::EncoderSpeed,
     codec_threads: usize,
@@ -86,7 +94,7 @@ fn transcode(
 }
 
 fn validate_config(cfg: &config::Config) -> Result<(), Box<dyn std::error::Error>> {
-    let src_path = std::path::Path::new(&cfg.pipe.source.path);
+    let src_path = Path::new(&cfg.pipe.source.path);
 
     if !src_path.exists() {
         return Err(format!("Source directory does not exist: {}", src_path.display()).into());
@@ -98,7 +106,7 @@ fn validate_config(cfg: &config::Config) -> Result<(), Box<dyn std::error::Error
 
     // NB: This is only for the prototype! The real version writes to S3
 
-    let dest_path = std::path::Path::new(&cfg.pipe.destination.path);
+    let dest_path = Path::new(&cfg.pipe.destination.path);
 
     if !dest_path.exists() {
         return Err(format!(
@@ -120,9 +128,9 @@ fn validate_config(cfg: &config::Config) -> Result<(), Box<dyn std::error::Error
 }
 
 fn process_file(
-    src_path: &std::path::Path,
-    src_dir: &std::path::Path,
-    dest_dir: &std::path::Path,
+    src_path: &Path,
+    src_dir: &Path,
+    dest_dir: &Path,
     jxl_quality: f32,
     jxl_effort: jpegxl_rs::encode::EncoderSpeed,
     codec_threads: usize,
@@ -177,11 +185,11 @@ fn process_file(
 
 fn start_watching(
     cfg: &config::Config,
-    tx: &crossbeam_channel::Sender<std::path::PathBuf>,
+    tx: &crossbeam_channel::Sender<PathBuf>,
     in_flight_set: &InFlightSet,
 ) -> Result<notify::PollWatcher, Box<dyn std::error::Error>> {
-    let src_path = std::path::PathBuf::from(&cfg.pipe.source.path);
-    let dest_dir = std::path::PathBuf::from(&cfg.pipe.destination.path);
+    let src_path = PathBuf::from(&cfg.pipe.source.path);
+    let dest_dir = PathBuf::from(&cfg.pipe.destination.path);
 
     println!(
         "src: {} dest: {}",
@@ -205,7 +213,7 @@ fn start_watching(
     }
     drop(set);
 
-    let closure_in_flight_set = std::sync::Arc::clone(in_flight_set);
+    let closure_in_flight_set = Arc::clone(in_flight_set);
     let closure_tx = tx.clone();
 
     let mut watcher = notify::PollWatcher::new(
@@ -238,15 +246,8 @@ fn start_watching(
     Ok(watcher)
 }
 
-struct PipeHandle {
-    _watcher: notify::PollWatcher,
-    _tx: crossbeam_channel::Sender<std::path::PathBuf>,
-    _rx: crossbeam_channel::Receiver<std::path::PathBuf>,
-    workers: std::vec::Vec<std::thread::JoinHandle<()>>,
-}
-
 fn start_workers_for_pipe(
-    config_filename: &std::path::PathBuf,
+    config_filename: &PathBuf,
 ) -> Result<PipeHandle, Box<dyn std::error::Error>> {
     let contents = std::fs::read_to_string(config_filename)?;
 
@@ -254,7 +255,7 @@ fn start_workers_for_pipe(
     // convert cfg into a parsed datastructure
 
     let in_flight_set: InFlightSet =
-        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        Arc::new(Mutex::new(HashSet::new()));
 
     validate_config(&cfg)?;
 
@@ -262,8 +263,8 @@ fn start_workers_for_pipe(
 
     let watcher = start_watching(&cfg, &tx, &in_flight_set)?;
 
-    let src_dir = std::path::PathBuf::from(&cfg.pipe.source.path);
-    let dest_dir = std::path::PathBuf::from(&cfg.pipe.destination.path);
+    let src_dir = PathBuf::from(&cfg.pipe.source.path);
+    let dest_dir = PathBuf::from(&cfg.pipe.destination.path);
 
     let jxl_cfg = cfg
         .pipe
@@ -292,7 +293,7 @@ fn start_workers_for_pipe(
         let rx = rx.clone();
         let src_dir = src_dir.clone();
         let dest_dir = dest_dir.clone();
-        let in_flight_set = std::sync::Arc::clone(&in_flight_set);
+        let in_flight_set = Arc::clone(&in_flight_set);
 
         let worker = std::thread::spawn(move || {
             for src_path in rx.iter() {
@@ -329,15 +330,15 @@ fn start_workers_for_pipe(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config_dir = std::path::Path::new(CONFIG_DIR);
+    let config_dir = Path::new(CONFIG_DIR);
 
     if !config_dir.is_dir() {
         return Err(format!("config dir does not exist: {}", config_dir.display()).into());
     }
 
-    let mut pipes: std::collections::HashMap<String, PipeHandle> = std::collections::HashMap::new();
+    let mut pipes: HashMap<String, PipeHandle> = HashMap::new();
 
-    let mut entries: std::vec::Vec<std::path::PathBuf> = std::fs::read_dir(config_dir)?
+    let mut entries: std::vec::Vec<PathBuf> = std::fs::read_dir(config_dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
