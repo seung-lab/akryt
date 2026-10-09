@@ -1,6 +1,7 @@
 use std::collections::{HashSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::vec::Vec;
 use std::thread;
 use tempfile;
 
@@ -22,7 +23,7 @@ struct PipeHandle {
     _watcher: notify::PollWatcher,
     _tx: crossbeam_channel::Sender<PathBuf>,
     _rx: crossbeam_channel::Receiver<PathBuf>,
-    workers: std::vec::Vec<std::thread::JoinHandle<()>>,
+    workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 fn int_to_jxl_effort(effort: u8) -> jpegxl_rs::encode::EncoderSpeed {
@@ -281,7 +282,7 @@ fn start_workers_for_pipe(
     let jxl_effort = int_to_jxl_effort(jxl_cfg.effort);
 
     let codec_threads = cfg.pipe.threads.codec;
-    let mut workers = std::vec::Vec::new();
+    let mut workers = Vec::new();
     let num_workers = cfg.pipe.threads.worker;
 
     println!(
@@ -338,7 +339,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut pipes: HashMap<String, PipeHandle> = HashMap::new();
 
-    let mut entries: std::vec::Vec<PathBuf> = std::fs::read_dir(config_dir)?
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(config_dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
