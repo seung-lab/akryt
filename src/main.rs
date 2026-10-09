@@ -245,7 +245,9 @@ struct PipeHandle {
     workers: std::vec::Vec<std::thread::JoinHandle<()>>,
 }
 
-fn start_workers_for_pipe(config_filename: &std::path::PathBuf) -> Result<PipeHandle, Box<dyn std::error::Error>> {
+fn start_workers_for_pipe(
+    config_filename: &std::path::PathBuf,
+) -> Result<PipeHandle, Box<dyn std::error::Error>> {
     let contents = std::fs::read_to_string(config_filename)?;
 
     let cfg: config::Config = toml::from_str(&contents)?;
@@ -281,33 +283,36 @@ fn start_workers_for_pipe(config_filename: &std::path::PathBuf) -> Result<PipeHa
     let mut workers = std::vec::Vec::new();
     let num_workers = cfg.pipe.threads.worker;
 
-    println!("Starting {} pipe workers with {} codec threads each.", num_workers, codec_threads);
+    println!(
+        "Starting {} pipe workers with {} codec threads each.",
+        num_workers, codec_threads
+    );
 
     for t in 0..num_workers {
-    	let rx = rx.clone();
-    	let src_dir = src_dir.clone();
-    	let dest_dir = dest_dir.clone();
-    	let in_flight_set = std::sync::Arc::clone(&in_flight_set);
+        let rx = rx.clone();
+        let src_dir = src_dir.clone();
+        let dest_dir = dest_dir.clone();
+        let in_flight_set = std::sync::Arc::clone(&in_flight_set);
 
-	    let worker = std::thread::spawn(move || {
-	        for src_path in rx.iter() {
-	        	println!("Thread {}", t);
-	            if let Err(err) = process_file(
-	                &src_path,
-	                &src_dir,
-	                &dest_dir,
-	                jxl_quality,
-	                jxl_effort,
-	                codec_threads,
-	                &in_flight_set,
-	            ) {
-	            	eprintln!("Error processing {}: {err}", src_path.display());
-	            }
-	        }
-	    });
+        let worker = std::thread::spawn(move || {
+            for src_path in rx.iter() {
+                println!("Thread {}", t);
+                if let Err(err) = process_file(
+                    &src_path,
+                    &src_dir,
+                    &dest_dir,
+                    jxl_quality,
+                    jxl_effort,
+                    codec_threads,
+                    &in_flight_set,
+                ) {
+                    eprintln!("Error processing {}: {err}", src_path.display());
+                }
+            }
+        });
 
-	    workers.push(worker);
-	}
+        workers.push(worker);
+    }
 
     println!(
         "akryt: polling every {} msec: {}",
@@ -315,55 +320,61 @@ fn start_workers_for_pipe(config_filename: &std::path::PathBuf) -> Result<PipeHa
         cfg.pipe.source.path
     );
 
-	Ok(PipeHandle{_watcher: watcher, _tx: tx, _rx: rx, workers: workers})
+    Ok(PipeHandle {
+        _watcher: watcher,
+        _tx: tx,
+        _rx: rx,
+        workers: workers,
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let config_dir = std::path::Path::new(CONFIG_DIR);
+    let config_dir = std::path::Path::new(CONFIG_DIR);
 
-	if !config_dir.is_dir() {
-		return Err(format!("config dir does not exist: {}", config_dir.display()).into());
-	}
+    if !config_dir.is_dir() {
+        return Err(format!("config dir does not exist: {}", config_dir.display()).into());
+    }
 
-	let mut pipes : std::collections::HashMap<String, PipeHandle> = std::collections::HashMap::new();
+    let mut pipes: std::collections::HashMap<String, PipeHandle> = std::collections::HashMap::new();
 
-	let mut entries: std::vec::Vec<std::path::PathBuf> = std::fs::read_dir(config_dir)?
-		.filter_map(|e| e.ok())
-		.map(|e| e.path())
-		.filter(|p| {
-			p.is_file()
-				&& p.extension()
-					.and_then(|e| e.to_str())
-					.map(|e| e.eq_ignore_ascii_case("toml"))
-					.unwrap_or(false)
-		})
-		.collect();
-	entries.sort();
+    let mut entries: std::vec::Vec<std::path::PathBuf> = std::fs::read_dir(config_dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("toml"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    entries.sort();
 
-	for path in entries {
-		let name = path.file_stem()
-			.and_then(|s| s.to_str())
+    for path in entries {
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
             .unwrap_or("<unknown>")
             .to_string();
 
         println!("Starting: {}", name);
 
-		match start_workers_for_pipe(&path) {
-			Ok(handle) => {
-				println!("Opened {}", name);
-				pipes.insert(name, handle);
-			}
-			Err(err) => {
-				eprintln!("Encountered an error opening {}: {err}", name);
-			}
-		}
-	}
+        match start_workers_for_pipe(&path) {
+            Ok(handle) => {
+                println!("Opened {}", name);
+                pipes.insert(name, handle);
+            }
+            Err(err) => {
+                eprintln!("Encountered an error opening {}: {err}", name);
+            }
+        }
+    }
 
-	if pipes.is_empty() {
-		return Err("no pipes started".into());
-	}
+    if pipes.is_empty() {
+        return Err("no pipes started".into());
+    }
 
-	println!("akryt running: {} pipe(s)", pipes.len());
+    println!("akryt running: {} pipe(s)", pipes.len());
 
     std::thread::park();
 
