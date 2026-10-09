@@ -23,9 +23,11 @@ pub struct Pipe {
 pub struct Source {
     pub path: String,
     #[serde(deserialize_with = "parse_byte_size")]
-    pub size: u64,
+    pub runway_size: u64,
     #[serde(with = "humantime_serde")]
     pub poll: std::time::Duration,
+    #[serde(deserialize_with = "parse_byte_size")]
+    pub expected_file_size: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -2,8 +2,9 @@
 name = "machine01"
 source = { 
 	path = "nfs://mnt/machine01", 
-	size = "25GB", 
+	runway_size = "25GB", 
 	poll = "150ms",
+	expected_file_size = "36001078B"
 }
 destination =  {
 	path = "nokura://mybucket/",
