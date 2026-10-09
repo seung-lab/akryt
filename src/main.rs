@@ -1,8 +1,8 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::vec::Vec;
 use std::thread;
+use std::vec::Vec;
 use tempfile;
 
 use crossbeam_channel;
@@ -217,6 +217,7 @@ fn start_watching(
 
     let closure_in_flight_set = Arc::clone(in_flight_set);
     let closure_tx = tx.clone();
+    let expected_size = cfg.pipe.source.expected_file_size;
 
     let mut watcher = notify::PollWatcher::new(
         move |res: Result<notify::Event, notify::Error>| match res {
@@ -231,10 +232,16 @@ fn start_watching(
                     } else if closure_set.contains(path) {
                         println!("already in paths: {}", path.display());
                         continue;
-                    } else {
-                        closure_tx.send(path.to_path_buf());
-                        closure_set.insert(path.to_path_buf());
-                        println!("added: {}", path.display());
+                    }
+
+                    if let Ok(meta) = std::fs::metadata(&path) {
+                        if meta.len() == expected_size {
+                            closure_tx.send(path.to_path_buf());
+                            closure_set.insert(path.to_path_buf());
+                            println!("added: {}", path.display());
+                        } else {
+                            println!("incorrect file size: {}: {}", path.display(), meta.len());
+                        }
                     }
                 }
             }
@@ -256,8 +263,7 @@ fn start_workers_for_pipe(
     let cfg: config::Config = toml::from_str(&contents)?;
     // convert cfg into a parsed datastructure
 
-    let in_flight_set: InFlightSet =
-        Arc::new(Mutex::new(HashSet::new()));
+    let in_flight_set: InFlightSet = Arc::new(Mutex::new(HashSet::new()));
 
     validate_config(&cfg)?;
 
