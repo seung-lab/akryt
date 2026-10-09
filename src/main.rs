@@ -15,6 +15,7 @@ mod config;
 type InFlightSet = std::sync::Arc<std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>>;
 
 const QUEUE_CAPACITY: usize = 1_000_000;
+const CONFIG_DIR: &str = "config/";
 
 fn int_to_jxl_effort(effort: u8) -> jpegxl_rs::encode::EncoderSpeed {
     use jpegxl_rs::encode::EncoderSpeed::*;
@@ -244,7 +245,7 @@ struct PipeHandle {
     workers: std::vec::Vec<std::thread::JoinHandle<()>>,
 }
 
-fn start_workers_for_pipe(config_filename: &str) -> Result<PipeHandle, Box<dyn std::error::Error>> {
+fn start_workers_for_pipe(config_filename: &std::path::PathBuf) -> Result<PipeHandle, Box<dyn std::error::Error>> {
     let contents = std::fs::read_to_string(config_filename)?;
 
     let cfg: config::Config = toml::from_str(&contents)?;
@@ -318,7 +319,51 @@ fn start_workers_for_pipe(config_filename: &str) -> Result<PipeHandle, Box<dyn s
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let pipe = start_workers_for_pipe("config/test.toml");
+	let config_dir = std::path::Path::new(CONFIG_DIR);
+
+	if !config_dir.is_dir() {
+		return Err(format!("config dir does not exist: {}", config_dir.display()).into());
+	}
+
+	let mut pipes : std::collections::HashMap<String, PipeHandle> = std::collections::HashMap::new();
+
+	let mut entries: std::vec::Vec<std::path::PathBuf> = std::fs::read_dir(config_dir)?
+		.filter_map(|e| e.ok())
+		.map(|e| e.path())
+		.filter(|p| {
+			p.is_file()
+				&& p.extension()
+					.and_then(|e| e.to_str())
+					.map(|e| e.eq_ignore_ascii_case("toml"))
+					.unwrap_or(false)
+		})
+		.collect();
+	entries.sort();
+
+	for path in entries {
+		let name = path.file_stem()
+			.and_then(|s| s.to_str())
+            .unwrap_or("<unknown>")
+            .to_string();
+
+        println!("Starting: {}", name);
+
+		match start_workers_for_pipe(&path) {
+			Ok(handle) => {
+				println!("Opened {}", name);
+				pipes.insert(name, handle);
+			}
+			Err(err) => {
+				eprintln!("Encountered an error opening {}: {err}", name);
+			}
+		}
+	}
+
+	if pipes.is_empty() {
+		return Err("no pipes started".into());
+	}
+
+	println!("akryt running: {} pipe(s)", pipes.len());
 
     std::thread::park();
 
