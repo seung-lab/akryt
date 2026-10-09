@@ -235,8 +235,8 @@ fn start_watching(
     Ok(watcher)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let contents = std::fs::read_to_string("config/test.toml")?;
+fn start_workers_for_pipe(config_filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let contents = std::fs::read_to_string(config_filename)?;
 
     let cfg: config::Config = toml::from_str(&contents)?;
     // convert cfg into a parsed datastructure
@@ -271,27 +271,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dest_dir_closure = dest_dir.clone();
     let codec_threads_closure = cfg.pipe.threads.codec;
 
-    let closure_in_flight_set = std::sync::Arc::clone(&in_flight_set);
+    let mut threads = std::vec::Vec::new();
+    let num_workers = cfg.pipe.threads.worker;
 
-    let processing_thread = std::thread::spawn(move || {
-        for src_path in rx.iter() {
-            process_file(
-                &src_path,
-                &src_dir,
-                &dest_dir,
-                jxl_quality,
-                jxl_effort,
-                codec_threads_closure,
-                &closure_in_flight_set,
-            );
-        }
-    });
+    for _ in 0..num_workers {
+    	let rx = rx.clone();
+    	let src_dir = src_dir.clone();
+    	let dest_dir = dest_dir.clone();
+    	let in_flight_set = std::sync::Arc::clone(&in_flight_set);
+
+	    let worker = std::thread::spawn(move || {
+	        for src_path in rx.iter() {
+	            process_file(
+	                &src_path,
+	                &src_dir,
+	                &dest_dir,
+	                jxl_quality,
+	                jxl_effort,
+	                codec_threads_closure,
+	                &in_flight_set,
+	            );
+	        }
+	    });
+
+	    threads.push(worker);
+	}
 
     println!(
         "akryt: polling every {} msec: {}",
         cfg.pipe.source.poll.as_millis(),
         cfg.pipe.source.path
     );
+
+	Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+	start_workers_for_pipe("config/test.toml");
+
     std::thread::park();
 
     Ok(())
