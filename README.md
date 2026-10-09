@@ -4,6 +4,16 @@ Realtime high-throughput image tile compression.
 
 Electron microscopy datasets are getting too big. Offline compression doesn't solve the problem. We need reliable realtime transcoding.
 
+## Compiling
+
+This is a Rust project, you'll need a Rust compilation toolchain installed.
+
+```
+cargo build --release
+```
+
+This will create a binary `./target/release/akryt` that you can use to run the program.
+
 ## Project Mission
 
 Develop the capability to perform realtime transcoding of uncompressed image tiles to JEPG-XL for multiple electron microscopy imaging processes at 400 MB/sec per a microscope over four microscopes (1.6 GB/sec or 12.8 Gbps). The results should be written to object storage.
