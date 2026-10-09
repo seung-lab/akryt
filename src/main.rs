@@ -210,7 +210,7 @@ fn start_watching(
     let mut watcher = notify::PollWatcher::new(
         move |res: Result<notify::Event, notify::Error>| match res {
             Ok(event) => {
-                let closure_set = closure_in_flight_set.lock().unwrap();
+                let mut closure_set = closure_in_flight_set.lock().unwrap();
 
                 for path in &event.paths {
                     println!("considering: {}", path.display());
@@ -222,6 +222,8 @@ fn start_watching(
                         continue;
                     } else {
                         closure_tx.send(path.to_path_buf());
+                        closure_set.insert(path.to_path_buf());
+                        println!("added: {}", path.display());
                     }
                 }
             }
@@ -235,7 +237,14 @@ fn start_watching(
     Ok(watcher)
 }
 
-fn start_workers_for_pipe(config_filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+struct PipeHandle {
+    _watcher: notify::PollWatcher,
+    _tx: crossbeam_channel::Sender<std::path::PathBuf>,
+    _rx: crossbeam_channel::Receiver<std::path::PathBuf>,
+    workers: std::vec::Vec<std::thread::JoinHandle<()>>,
+}
+
+fn start_workers_for_pipe(config_filename: &str) -> Result<PipeHandle, Box<dyn std::error::Error>> {
     let contents = std::fs::read_to_string(config_filename)?;
 
     let cfg: config::Config = toml::from_str(&contents)?;
@@ -267,14 +276,13 @@ fn start_workers_for_pipe(config_filename: &str) -> Result<(), Box<dyn std::erro
     let jxl_quality = jxl_cfg.quality;
     let jxl_effort = int_to_jxl_effort(jxl_cfg.effort);
 
-    let src_dir_closure = src_dir.clone();
-    let dest_dir_closure = dest_dir.clone();
-    let codec_threads_closure = cfg.pipe.threads.codec;
-
-    let mut threads = std::vec::Vec::new();
+    let codec_threads = cfg.pipe.threads.codec;
+    let mut workers = std::vec::Vec::new();
     let num_workers = cfg.pipe.threads.worker;
 
-    for _ in 0..num_workers {
+    println!("Starting {} pipe workers with {} codec threads each.", num_workers, codec_threads);
+
+    for t in 0..num_workers {
     	let rx = rx.clone();
     	let src_dir = src_dir.clone();
     	let dest_dir = dest_dir.clone();
@@ -282,19 +290,22 @@ fn start_workers_for_pipe(config_filename: &str) -> Result<(), Box<dyn std::erro
 
 	    let worker = std::thread::spawn(move || {
 	        for src_path in rx.iter() {
-	            process_file(
+	        	println!("Thread {}", t);
+	            if let Err(err) = process_file(
 	                &src_path,
 	                &src_dir,
 	                &dest_dir,
 	                jxl_quality,
 	                jxl_effort,
-	                codec_threads_closure,
+	                codec_threads,
 	                &in_flight_set,
-	            );
+	            ) {
+	            	eprintln!("Error processing {}: {err}", src_path.display());
+	            }
 	        }
 	    });
 
-	    threads.push(worker);
+	    workers.push(worker);
 	}
 
     println!(
@@ -303,11 +314,11 @@ fn start_workers_for_pipe(config_filename: &str) -> Result<(), Box<dyn std::erro
         cfg.pipe.source.path
     );
 
-	Ok(())
+	Ok(PipeHandle{_watcher: watcher, _tx: tx, _rx: rx, workers: workers})
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-	start_workers_for_pipe("config/test.toml");
+	let pipe = start_workers_for_pipe("config/test.toml");
 
     std::thread::park();
 
