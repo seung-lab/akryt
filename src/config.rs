@@ -110,6 +110,8 @@ fn parse_byte_size_str(s: &str) -> Result<u64, String> {
         "gi" | "gib" => (1_073_741_824, "GiB"),
         "tb" | "TB" => (1_000_000_000_000, "TB"),
         "ti" | "TiB" => (1_099_511_627_776, "TiB"),
+        "pb" | "PB" => (1_000_000_000_000_000, "TB"),
+        "pi" | "PiB" => (1_125_899_906_842_624, "TiB"),
         other => return Err(format!("unknown unit: {other:?}")),
     };
 
