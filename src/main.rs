@@ -1,6 +1,7 @@
 use std::collections;
 use std::sync;
 use std::thread;
+use tempfile;
 
 use crossbeam_channel;
 use image;
@@ -75,7 +76,10 @@ fn transcode(
         std::fs::create_dir_all(parent)?;
     }
 
-    std::fs::write(dest_path, &jxl_data.data)?;
+    let tmp = tempfile::NamedTempFile::new()?;
+
+    std::fs::write(tmp.path(), &jxl_data.data)?;
+    tmp.persist(&dest_path)?;
 
     Ok(())
 }
