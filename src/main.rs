@@ -44,7 +44,7 @@ fn int_to_jxl_effort(effort: u8) -> jpegxl_rs::encode::EncoderSpeed {
     }
 }
 
-fn transcode(
+fn transcode_to_jxl(
     src_path: &Path,
     dest_path: &Path,
     quality: f32,
@@ -158,7 +158,7 @@ fn process_file(
 
     let t_start = std::time::Instant::now();
 
-    match transcode(
+    match transcode_to_jxl(
         &src_path,
         &dest_path,
         jxl_quality,
