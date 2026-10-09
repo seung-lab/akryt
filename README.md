@@ -14,6 +14,14 @@ cargo build --release
 
 This will create a binary `./target/release/akryt` that you can use to run the program.
 
+## Concepts
+
+`akryt` instantiates one or more pipes between two directories that are specified per a pipe. The directories are expected to be NFS mounts.
+
+Each pipe specifies how many worker threads to allocate and how many codec threads per a worker. Each worker consumes filenames produced by a directory watcher and begins transcoding. The transcoded files are written to a temporary file, renamed to the destination, then the original is deleted.
+
+An example config file can be found in the config directory of this repository.
+
 ## Project Mission
 
 Develop the capability to perform realtime transcoding of uncompressed image tiles to JEPG-XL for multiple electron microscopy imaging processes at 400 MB/sec per a microscope over four microscopes (1.6 GB/sec or 12.8 Gbps). The results should be written to object storage.
